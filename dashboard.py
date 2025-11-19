@@ -18,6 +18,7 @@ from sklearn.metrics import mean_absolute_percentage_error
 #from tensorflow.keras.models import load_model
 from itertools import combinations
 from collections import Counter
+from sklearn.model_selection import train_test_split
 
 # --------------------------
 # Config
@@ -33,6 +34,21 @@ os.makedirs(MODELS_DIR, exist_ok=True)
 client = MongoClient("mongodb://localhost:27017/")
 db = client.sample_supplies
 collection = db.sales
+
+def crear_lags(df_prod, n_lags=14):
+    df = df_prod.copy()
+
+    # Crear 14 lags
+    for i in range(1, n_lags + 1):
+        df[f'lag_{i}'] = df['total_quantity'].shift(i)
+
+    # Eliminar filas con NaN por lags
+    df = df.dropna()
+
+    # Variables X finales: lags + month + is_weekend
+    columnas_X = [f'lag_{i}' for i in range(1, n_lags + 1)] + ['date','month', 'is_weekend', "day_of_week", 'product']
+
+    return df[['total_quantity'] + columnas_X]
 
 def crear_df(collection):
     pipeline = [
@@ -237,7 +253,7 @@ print(df['total_revenue'].sum())
 
 st.write(f"📌 Mostrando datos desde **{start_date}** hasta **{end_date}**")
 
-tab1, tab2, tab3 = st.tabs(["Sales", "Clients", "Forecasting"])
+tab1, tab2, tab3 = st.tabs(["Sales💰", "Clients👥", "Forecasting📈"])
 
 with tab1:
     st.sidebar.markdown(f"**Filas:** {df_filtered.shape[0]} &nbsp;&nbsp; **Productos:** {df_filtered['product'].nunique()}")
@@ -462,7 +478,7 @@ df_clients = df_clients(collection)
 df_clients['saleDate'] = pd.to_datetime(df_clients['saleDate']).dt.normalize()  # fecha sin hora
 print(df_clients['total_revenue'].sum())
 
-df_filtered = df_clients[
+df1 = df_clients[
     (df_clients['saleDate'] >= pd.to_datetime(start_date)) &
     (df_clients['saleDate'] <= pd.to_datetime(end_date))
 ]
@@ -471,13 +487,13 @@ with tab2:
     st.header("📊 Análisis general de clientes")
 
     # --- Selección de tienda ---
-    tiendas = ['Todas'] + list(df_filtered['storeLocation'].unique())
+    tiendas = ['Todas'] + list(df1['storeLocation'].unique())
     sel_store = st.selectbox("Selecciona una tienda", tiendas)
 
     if sel_store != 'Todas':
-        df_store = df_filtered[df_filtered['storeLocation'] == sel_store]
+        df_store = df1[df1['storeLocation'] == sel_store]
     else:
-        df_store = df_filtered.copy()
+        df_store = df1.copy()
 
     # --- Métricas principales ---
     total_rev_store = df_store['total_revenue'].sum()
@@ -584,4 +600,155 @@ with tab2:
             markers = True
         )
         st.plotly_chart(fig_hist, use_container_width=True)
-        
+
+def df_models(collection):
+    pipeline = [
+        # 1. Desenrollar los items del array
+        {"$unwind": "$items"},
+
+        # 2. Agrupar por fecha y por tipo de producto, sumando cantidad e ingreso
+        {
+            "$group": {
+                "_id": {
+                    "date": {"$dateToString": {"format": "%Y-%m-%d", "date": "$saleDate"}},
+                    'hour': {"$hour": "$saleDate"},
+                    "product": "$items.name"
+                },
+                "total_quantity": {"$sum": "$items.quantity"},
+                "total_revenue": {
+                    "$sum": {
+                        "$multiply": ["$items.quantity", "$items.price"]
+                    }
+                }
+            }
+        },
+
+        # 3. Ordenar por fecha y producto
+        {
+            "$sort": {
+                "_id.date": 1,
+                "_id.product": 1
+            }
+        }
+    ]
+    results = collection.aggregate(pipeline)
+    df = pd.DataFrame(results)
+    df = df.join(pd.json_normalize(df["_id"]))
+    df = df.drop(columns=["_id"])
+
+    print(df.columns)
+    return df
+
+cols = ['total_quantity', 'lag_1', 'lag_2', 'lag_3', 'lag_4', 'lag_5', 'lag_6', 'lag_7', 'lag_8', 'lag_9', 'lag_10', 'lag_11', 'lag_12', 'lag_13',
+        'lag_14', 'month', 'is_weekend', 'day_of_week']
+
+def process_train(df, cols):
+    #df["hour"] = pd.to_datetime(df["time"], format="%H:%M:%S").dt.hour
+    df['date'] = pd.to_datetime(df['date'])
+    df = df.sort_values(["product", "date"])
+
+    # Nueva información temporal
+    df['month'] = df['date'].dt.month
+    df['day_of_week'] = df['date'].dt.dayofweek
+    df['is_weekend'] = (df['day_of_week'] >= 5).astype(int)
+
+    df_aux = (
+        df#(columns=["hour"])  # quitamos "hour"
+        .groupby(["date", "product"], as_index=False)
+        .agg({
+            "total_quantity": "sum",
+            "month": "first",
+            "day_of_week": "first",
+            "is_weekend": "first"
+        })
+    )
+
+    df_prod = crear_lags(df_aux)
+
+    #st.dataframe(df_prod)
+
+    # Fecha límite = última fecha - 14 días
+    last_date = df_prod['date'].max()
+    cutoff_date = last_date - pd.Timedelta(days=14)
+
+    # Train = hasta cutoff_date
+    train_df = df_prod[df_prod['date'] <= cutoff_date]
+
+    # Test = después del cutoff_date
+    test_df  = df_prod[df_prod['date'] > cutoff_date]
+
+    # Features y target
+    X_train = train_df[cols].drop("total_quantity", axis=1)
+    y_train = train_df["total_quantity"]
+
+    X_test  = test_df[cols].drop("total_quantity", axis=1)
+    y_test  = test_df["total_quantity"]
+
+    print(f"Train: {len(X_train)} filas")
+    print(f"Test (últimas 2 semanas): {len(X_test)} filas")
+
+    return df_aux, X_train, y_train, X_test, y_test
+
+with tab3:
+
+    st.header("📈 Forecasting de demanda - Próximos 7 días")
+
+    # Selección de producto
+    product_list = ['backpack', 'binder', 'envelopes', 'laptop', 'notepad', 'pens',
+       'printer paper']
+    sel_product = st.selectbox("Selecciona un producto para pronosticar", product_list)
+
+    df = df_models(collection)
+    #st.dataframe(df[df['product']==sel_product])
+
+    df, X_train, y_train, X_test, y_test = process_train(df[df['product']==sel_product], cols)
+    
+    # Ruta del modelo
+    model_path = f"best_model_{sel_product}.pkl"
+
+    # Cargar modelo
+    try:
+        model = joblib.load(model_path)
+        forecast_14 = model.predict(X_test)
+        st.success(f"Modelo cargado para: {sel_product}")
+    except FileNotFoundError:
+        st.warning(f"No hay modelo disponible para {sel_product}")
+        st.stop()
+
+    st.subheader("Pronóstico de unidades vendidas para próxima semana")
+    
+    l = len(y_test)
+
+    # Mostrar tabla de pronóstico
+    df_forecast = pd.DataFrame({
+        'Dates': df[df['product']==sel_product].tail(l)['date'].values,
+        "Real sales next week": y_test.values,
+        "Sales next week": forecast_14
+    })
+
+    col1, col2 = st.columns(2)
+
+    with col1:
+        df_forecast = df_forecast.sort_values("Dates").reset_index(drop=True)
+
+        st.subheader("📋 Resultados del forecast")
+        st.dataframe(df_forecast.style.format({
+            "Real sales next week": "{:.2f}",
+            "Sales next week": "{:.2f}"
+        }))
+
+    with col2:
+
+        # Gráfica comparativa
+        st.subheader("📊 Comparación: Real vs Pronosticado")
+
+        fig, ax = plt.subplots(figsize=(10, 4))
+        ax.plot(df_forecast["Dates"], df_forecast["Real sales next week"], label="Real", linewidth=2)
+        ax.plot(df_forecast["Dates"], df_forecast["Sales next week"], label="Forecast", linestyle="--", linewidth=2)
+
+        ax.set_xlabel("Fecha")
+        ax.set_ylabel("Cantidad")
+        ax.legend()
+        ax.grid(True)
+
+        st.pyplot(fig)
