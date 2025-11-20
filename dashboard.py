@@ -735,66 +735,66 @@ def process_train(df, cols):
 
     return df_aux, X_train, y_train, X_test, y_test
 
-# with tab3:
+with tab3:
 
-#     st.header("📈 Forecasting de demanda - Próximos 7 días")
+    st.header("📈 Forecasting de demanda - Próximos 7 días")
 
-#     # Selección de producto
-#     product_list = ['backpack', 'binder', 'envelopes', 'laptop', 'notepad', 'pens',
-#        'printer paper']
-#     sel_product = st.selectbox("Selecciona un producto para pronosticar", product_list)
+    # Selección de producto
+    product_list = ['backpack', 'binder', 'envelopes', 'laptop', 'notepad', 'pens',
+       'printer paper']
+    sel_product = st.selectbox("Selecciona un producto para pronosticar", product_list)
 
-#     df = df_models(collection)
-#     #st.dataframe(df[df['product']==sel_product])
+    df = df_models(collection)
+    #st.dataframe(df[df['product']==sel_product])
 
-#     df, X_train, y_train, X_test, y_test = process_train(df[df['product']==sel_product], cols)
+    df, X_train, y_train, X_test, y_test = process_train(df[df['product']==sel_product], cols)
     
-#     # Ruta del modelo
-#     model_path = f"best_model_{sel_product}.pkl"
+    # Ruta del modelo
+    model_path = f"best_model_{sel_product}.pkl"
 
-#     # Cargar modelo
-#     try:
-#         model = joblib.load(model_path)
-#         forecast_14 = model.predict(X_test)
-#         st.success(f"Modelo cargado para: {sel_product}")
-#     except FileNotFoundError:
-#         st.warning(f"No hay modelo disponible para {sel_product}")
-#         st.stop()
+    # Cargar modelo
+    try:
+        model = joblib.load(model_path)
+        forecast_14 = model.predict(X_test)
+        st.success(f"Modelo cargado para: {sel_product}")
+    except FileNotFoundError:
+        st.warning(f"No hay modelo disponible para {sel_product}")
+        st.stop()
 
-#     st.subheader("Pronóstico de unidades vendidas para próxima semana")
+    st.subheader("Pronóstico de unidades vendidas para próxima semana")
     
-#     l = len(y_test)
+    l = len(y_test)
 
-#     # Mostrar tabla de pronóstico
-#     df_forecast = pd.DataFrame({
-#         'Dates': df[df['product']==sel_product].tail(l)['date'].values,
-#         "Real sales next week": y_test.values,
-#         "Sales next week": forecast_14
-#     })
+    # Mostrar tabla de pronóstico
+    df_forecast = pd.DataFrame({
+        'Dates': df[df['product']==sel_product].tail(l)['date'].values,
+        "Real sales next week": y_test.values,
+        "Sales next week": forecast_14
+    })
 
-#     col1, col2 = st.columns(2)
+    col1, col2 = st.columns(2)
 
-#     with col1:
-#         df_forecast = df_forecast.sort_values("Dates").reset_index(drop=True)
+    with col1:
+        df_forecast = df_forecast.sort_values("Dates").reset_index(drop=True)
 
-#         st.subheader("📋 Resultados del forecast")
-#         st.dataframe(df_forecast.style.format({
-#             "Real sales next week": "{:.2f}",
-#             "Sales next week": "{:.2f}"
-#         }))
+        st.subheader("📋 Resultados del forecast")
+        st.dataframe(df_forecast.style.format({
+            "Real sales next week": "{:.2f}",
+            "Sales next week": "{:.2f}"
+        }))
 
-#     with col2:
+    with col2:
 
-#         # Gráfica comparativa
-#         st.subheader("📊 Comparación: Real vs Pronosticado")
+        # Gráfica comparativa
+        st.subheader("📊 Comparación: Real vs Pronosticado")
 
-#         fig, ax = plt.subplots(figsize=(10, 4))
-#         ax.plot(df_forecast["Dates"], df_forecast["Real sales next week"], label="Real", linewidth=2)
-#         ax.plot(df_forecast["Dates"], df_forecast["Sales next week"], label="Forecast", linestyle="--", linewidth=2)
+        fig, ax = plt.subplots(figsize=(10, 4))
+        ax.plot(df_forecast["Dates"], df_forecast["Real sales next week"], label="Real", linewidth=2)
+        ax.plot(df_forecast["Dates"], df_forecast["Sales next week"], label="Forecast", linestyle="--", linewidth=2)
 
-#         ax.set_xlabel("Fecha")
-#         ax.set_ylabel("Cantidad")
-#         ax.legend()
-#         ax.grid(True)
+        ax.set_xlabel("Fecha")
+        ax.set_ylabel("Cantidad")
+        ax.legend()
+        ax.grid(True)
 
-#         st.pyplot(fig)
+        st.pyplot(fig)
