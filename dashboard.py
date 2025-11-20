@@ -7,7 +7,7 @@ from pymongo import MongoClient
 import joblib
 import matplotlib.pyplot as plt
 import plotly.express as px
-from dotenv import load_dotenv
+#from dotenv import load_dotenv
 import plotly.graph_objects as go
 from sklearn.ensemble import RandomForestRegressor
 from sklearn.svm import SVR
