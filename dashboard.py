@@ -32,13 +32,9 @@ os.makedirs(MODELS_DIR, exist_ok=True)
 # Utility functions
 # --------------------------
 
-COSMOS_URL = os.getenv("COSMOS_URL")
-COSMOS_DB = os.getenv("COSMOS_DB")
-COSMOS_COLLECTION = os.getenv("COSMOS_COLLECTION")
-
-client = MongoClient(COSMOS_URL)
-db = client.COSMOS_DB
-collection = db.COSMOS_COLLECTION
+client = MongoClient("mongodb://karenproject2:z9PkVdtemdbbrO38N9RO9wEKW0xenBwKw3M1HETe2eDjPI4Abkk8aeN7HUAIuJWdDNV1VAMLgx8oACDbU7EXFw==@karenproject2.mongo.cosmos.azure.com:10255/?ssl=true&replicaSet=globaldb&retrywrites=false&maxIdleTimeMS=120000&appName=@karenproject2@")
+db = client.sample_supplies
+collection = db.sales
 
 def crear_lags(df_prod, n_lags=14):
     df = df_prod.copy()
@@ -57,42 +53,56 @@ def crear_lags(df_prod, n_lags=14):
 
 def crear_df(collection):
     pipeline = [
-    # 1. Desenrollar los items del array
-        {"$unwind": "$items"},
-
-        # 2. Agrupar por fecha y por tipo de producto, sumando cantidad e ingreso
-        {
-            "$group": {
-                "_id": {
-                    "date": {
-                            "$dateToString": {
-                                "format": "%Y-%m-%d",
-                                "date": { "$dateFromString": { "dateString": "$saleDate" }}
-                            }
-                        },
-                    "product": "$items.name"
-                },
-                "total_quantity": {"$sum": "$items.quantity"},
-                "total_revenue": {
-                    "$sum": {
-                        "$multiply": ["$items.quantity", "$items.price"]
-                    }
-                }
-            }
-        },
-
-        # 3. Ordenar por fecha y producto
-        {
-            "$sort": {
-                "_id.date": 1,
-                "_id.product": 1
+    # Asegura que saleDate siempre sea Date real
+    {
+        "$addFields": {
+            "saleDate": {
+                "$cond": [
+                    { "$eq": [ { "$type": "$saleDate" }, "string" ] },
+                    { "$toDate": "$saleDate" },
+                    "$saleDate"
+                ]
             }
         }
+    },
+
+    # Filtrar los que NO tienen saleDate válido
+    { "$match": { "saleDate": { "$ne": None } } },
+
+    # Evitar explosión si items no existe o está vacío
+    { "$unwind": { "path": "$items", "preserveNullAndEmptyArrays": False } },
+
+    {
+        "$group": {
+            "_id": {
+                "date": {
+                    "$dateToString": {
+                        "format": "%Y-%m-%d",
+                        "date": "$saleDate"
+                    }
+                },
+                "product": "$items.name"
+            },
+            "total_quantity": { "$sum": "$items.quantity" },
+            "total_revenue": {
+                "$sum": { "$multiply": ["$items.quantity", "$items.price"] }
+            }
+        }
+    },
+
+    { "$sort": { "_id.date": 1, "_id.product": 1 } }
     ]
+
     results = list(collection.aggregate(pipeline, allowDiskUse=True))
     df = pd.DataFrame(results)
-    df = df.join(pd.json_normalize(df["_id"]))
-    df = df.drop(columns=["_id"])
+
+    print(df.shape)
+
+    # si aún así faltara _id, lo detectamos
+    if "_id" not in df.columns:
+        raise ValueError('⚠️ El pipeline regresó documentos sin _id. Revisa input data.')
+
+    df = df.join(pd.json_normalize(df["_id"])).drop(columns=["_id"])
     return df
 
 def preprocess(df):
