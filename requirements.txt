@@ -1,6 +1,6 @@
 streamlit
-streamlit-folium
-folium
+#streamlit-folium
+#folium
 plotly
 scikit-learn==1.5.1
 pandas
@@ -11,5 +11,5 @@ gtfs-realtime-bindings
 protobuf
 python-dateutil
 pymongo
-python-dotenv==1.0.0
+#python-dotenv==1.0.0
 matplotlib
